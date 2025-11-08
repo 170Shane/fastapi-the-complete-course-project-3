@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from fastapi import Depends, FastAPI, HTTPException, Path
 from starlette import status
 import models
+from routers import authorisation 
 
 from database import SessionLocal, engine, Base
 
@@ -10,6 +11,7 @@ app = FastAPI()
 
 models.Base.metadata.create_all(bind=engine)
 
+app.include_router(authorisation.router) # Include the authorization router
 
 # Get a database session
 def get_db():
