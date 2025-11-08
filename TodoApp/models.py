@@ -1,7 +1,7 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
 from database import Base
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Column, ForeignKey, Integer, String, Boolean, DateTime
 
 class Todos(Base):
     __tablename__ = "todos"
@@ -13,6 +13,7 @@ class Todos(Base):
     completed = Column(Boolean, default=False)
     created_by = Column(String)
     created_date = Column(DateTime)
+    owner_id = Column(Integer, ForeignKey("users.id"))
 
 class TodosRequest(BaseModel):  
 
@@ -24,14 +25,14 @@ class TodosRequest(BaseModel):
     created_date: datetime = Field(default_factory=datetime.now, example="2023-10-05T14:48:00.000Z")
 
 
-# class Todos_Response(BaseModel):
-#     id: int
-#     title: str
-#     description: str
-#     priority: int
-#     completed: bool
-#     created_by: str
-#     created_date: datetime
+class users(Base):
+    __tablename__ = "users"
 
-#     class Config:
-#         orm_mode = True
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True)
+    email = Column(String, unique=True)
+    first_name = Column(String)
+    last_name = Column(String)
+    hashed_password = Column(String)
+    is_active = Column(Boolean, default=True)
+    role = Column(String, default="user")
