@@ -6,6 +6,7 @@ from models import users
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from starlette import status
+from fastapi.security import OAuth2PasswordRequestForm
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -37,7 +38,15 @@ def get_db():
     finally:
         db.close()
 
-db_dependency = Annotated[Session, Depends(get_db)]    
+db_dependency = Annotated[Session, Depends(get_db)] 
+
+def authenticate_user(db: Session, username: str, password: str):
+    user = db.query(users).filter(users.username == username).first()
+    if not user:
+        return False
+    if not pwd_context.verify(password, user.hashed_password):
+        return False
+    return True
 
 
 @router.get("/auth")
@@ -90,3 +99,15 @@ def update_user(user_id: int, update_user_request: UserUpdateRequest, db: db_dep
     db.commit()
     db.refresh(user_model)
     return user_model
+
+# login to get access token
+@router.post("/token")
+def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: db_dependency):
+   user = authenticate_user(db, form_data.username, form_data.password)
+   if not user:
+       raise HTTPException(
+           status_code=status.HTTP_401_UNAUTHORIZED,
+           detail="Incorrect username or password",
+           headers={"WWW-Authenticate": "Bearer"},
+       )   
+   return form_data.username, pwd_context.hash(form_data.password)
