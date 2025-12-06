@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+import token
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -6,10 +8,16 @@ from models import users
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from starlette import status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from jose import JWTError, jwt
 
-router = APIRouter()
+router = APIRouter(prefix="/auth", tags=["Authorisation"])
+
+SECRET_KEY = '2e6e825a91ddb2706c8b7b252f62ff9e09f43259f744bedf3630da14cb465c6b'
+ALGORITHM = 'HS256'
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_bearer = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 class UserCreateRequest(BaseModel):
     username: str
@@ -20,13 +28,17 @@ class UserCreateRequest(BaseModel):
     first_name: str
     last_name: str   
 
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
 class UserUpdateRequest(BaseModel):
     username: str
     email: str  
     full_name: str
     is_active: bool
     password: str
-    first_name: str
+    first_name: str 
     last_name: str
     role: str
 
@@ -46,17 +58,12 @@ def authenticate_user(db: Session, username: str, password: str):
         return False
     if not pwd_context.verify(password, user.hashed_password):
         return False
-    return True
+    return user
 
-
-@router.get("/auth")
-def get_user():
-    return {"user": "authenticated"}
-
-# get all Users
-@router.get("/auth/users", status_code=status.HTTP_200_OK)
-def get_all_users(db: db_dependency):
-    return db.query(users).all()
+def create_access_token(username: str, user_id: int, expires_delta: timedelta):
+    to_encode = {"sub": username, "id": user_id, "exp": datetime.now(timezone.utc) + expires_delta}
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
 
 # create a user
@@ -78,30 +85,9 @@ def create_user(create_user_request: UserCreateRequest, db: db_dependency):
     db.refresh(create_user_model)
     return create_user_model
 
-# update a user
-@router.put("/auth/{user_id}")
-def update_user(user_id: int, update_user_request: UserUpdateRequest, db: db_dependency):
-    user_model = db.query(users).filter(users.id == user_id).first()
-    if not user_model:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    # Update fields directly
-    user_model.username = update_user_request.username
-    user_model.email = update_user_request.email
-    user_model.first_name = update_user_request.first_name
-    user_model.last_name = update_user_request.last_name
-    user_model.full_name = update_user_request.full_name
-    user_model.is_active = update_user_request.is_active
-    user_model.hashed_password = pwd_context.hash(update_user_request.password)
-    user_model.role = update_user_request.role
-    
-    db.add(user_model)
-    db.commit()
-    db.refresh(user_model)
-    return user_model
 
 # login to get access token
-@router.post("/token")
+@router.post("/token", response_model=Token)
 def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: db_dependency):
    user = authenticate_user(db, form_data.username, form_data.password)
    if not user:
@@ -109,5 +95,25 @@ def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depen
            status_code=status.HTTP_401_UNAUTHORIZED,
            detail="Incorrect username or password",
            headers={"WWW-Authenticate": "Bearer"},
-       )   
-   return form_data.username, pwd_context.hash(form_data.password)
+       )
+   
+   token = create_access_token(form_data.username, user.id, timedelta(minutes=15))
+   return {"access_token": token, "token_type": "bearer"}
+
+async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
+   credentials_exception = HTTPException(
+       status_code=status.HTTP_401_UNAUTHORIZED,
+       detail="Could not validate credentials",
+       headers={"WWW-Authenticate": "Bearer"},
+   )
+   try:
+       payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+       username: str = payload.get("sub")
+       if username is None:
+           raise credentials_exception
+       return username
+   except JWTError:
+       raise credentials_exception
+#    if username is None:
+#        raise credentials_exception
+#    return user
