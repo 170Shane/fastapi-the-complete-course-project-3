@@ -44,6 +44,12 @@ class UserUpdateRequest(BaseModel):
 
 # Get a database session
 def get_db():
+    """
+    Gets a database session.
+
+    Yields a database session object.
+    Ensures the database session is closed after use.
+    """
     db = SessionLocal()
     try:
         yield db
@@ -53,6 +59,17 @@ def get_db():
 db_dependency = Annotated[Session, Depends(get_db)] 
 
 def authenticate_user(db: Session, username: str, password: str):
+    """
+    Authenticates a user.
+
+    Args:
+        db (Session): The database session.
+        username (str): The username to authenticate.
+        password (str): The password to authenticate.
+
+    Returns:
+        bool: True if the user is authenticated, False otherwise.
+    """
     user = db.query(users).filter(users.username == username).first()
     if not user:
         return False
@@ -61,6 +78,17 @@ def authenticate_user(db: Session, username: str, password: str):
     return user
 
 def create_access_token(username: str, user_id: int, expires_delta: timedelta):
+    """
+    Creates an access token for a user.
+
+    Args:
+        username (str): The username to create the access token for.
+        user_id (int): The user ID to create the access token for.
+        expires_delta (timedelta): The time delta for when the access token will expire.
+
+    Returns:
+        str: The encoded access token.
+    """
     to_encode = {"sub": username, "id": user_id, "exp": datetime.now(timezone.utc) + expires_delta}
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -69,6 +97,16 @@ def create_access_token(username: str, user_id: int, expires_delta: timedelta):
 # create a user
 @router.post("/auth/", status_code=status.HTTP_201_CREATED)
 def create_user(create_user_request: UserCreateRequest, db: db_dependency):
+    """
+    Creates a new user.
+
+    Args:
+        create_user_request (UserCreateRequest): The user create request.
+        db (Session): The database session.
+
+    Returns:
+        User: The created user.
+    """
     create_user_model = users(
         username=create_user_request.username,
         email=create_user_request.email,
@@ -89,31 +127,57 @@ def create_user(create_user_request: UserCreateRequest, db: db_dependency):
 # login to get access token
 @router.post("/token", response_model=Token)
 def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: db_dependency):
-   user = authenticate_user(db, form_data.username, form_data.password)
-   if not user:
-       raise HTTPException(
-           status_code=status.HTTP_401_UNAUTHORIZED,
-           detail="Incorrect username or password",
-           headers={"WWW-Authenticate": "Bearer"},
-       )
-   
-   token = create_access_token(form_data.username, user.id, timedelta(minutes=15))
-   return {"access_token": token, "token_type": "bearer"}
+    """
+    Logs in a user and returns an access token.
+
+    Args:
+        form_data (OAuth2PasswordRequestForm): The login form data.
+        db (Session): The database session.
+
+    Returns:
+        Token: The access token.
+
+    Raises:
+        HTTPException: 401 Unauthorized if the username or password is incorrect.
+    """
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    token = create_access_token(form_data.username, user.id, timedelta(minutes=15))
+    return {"access_token": token, "token_type": "bearer"}
 
 async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
-   credentials_exception = HTTPException(
-       status_code=status.HTTP_401_UNAUTHORIZED,
-       detail="Could not validate credentials",
-       headers={"WWW-Authenticate": "Bearer"},
-   )
-   try:
-       payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-       username: str = payload.get("sub")
-       if username is None:
-           raise credentials_exception
-       return username
-   except JWTError:
-       raise credentials_exception
-#    if username is None:
-#        raise credentials_exception
-#    return user
+    """
+    Gets the current user.
+
+    Args:
+        token (str): The access token to validate.
+
+    Returns:
+        str: The username of the current user.
+
+    Raises:
+        HTTPException: 401 Unauthorized if the access token is invalid.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        user_id: int = payload.get("id")
+        if username is None or user_id is None:
+            raise credentials_exception
+        return {"username": username, "id": user_id} # username, user_id
+    except JWTError:
+        raise credentials_exception
+    #    if username is None:
+    #        raise credentials_exception
+    #    return user
